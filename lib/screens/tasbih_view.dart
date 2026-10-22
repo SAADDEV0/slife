@@ -231,8 +231,8 @@ class _TasbihViewState extends State<TasbihView> with WidgetsBindingObserver {
                         progress: repo.progress,
                         target: repo.target,
                         count: repo.count,
-                        track: c.primarySoft,
-                        fill: c.primary,
+                        track: c.emeraldSoft,
+                        fill: c.emerald,
                         bead: c.card,
                       ),
                       child: Center(
@@ -275,13 +275,13 @@ class _TasbihViewState extends State<TasbihView> with WidgetsBindingObserver {
                                   vertical: 3,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: c.primarySoft,
+                                  color: c.emeraldSoft,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   '${repo.rounds} ${repo.rounds == 1 ? 'round' : 'rounds'}',
                                   style: context.text.labelSmall?.copyWith(
-                                    color: c.primary,
+                                    color: c.emerald,
                                   ),
                                 ),
                               ),
@@ -298,7 +298,20 @@ class _TasbihViewState extends State<TasbihView> with WidgetsBindingObserver {
         ),
         const SizedBox(height: 8),
         Center(
-          child: Text('Tap the circle to count', style: context.text.bodySmall),
+          child: TextButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                fullscreenDialog: true,
+                builder: (_) => ChangeNotifierProvider.value(
+                  value: context.read<TasbihRepository>(),
+                  child: const TasbihFocusScreen(),
+                ),
+              ),
+            ),
+            style: TextButton.styleFrom(foregroundColor: c.emerald),
+            icon: const Icon(Icons.fullscreen_rounded),
+            label: const Text('Focus mode: tap anywhere'),
+          ),
         ),
         const SizedBox(height: 16),
         Padding(
@@ -502,8 +515,8 @@ class _TasbihStats extends StatelessWidget {
                                   height: n == 0 ? 4 : 4 + 56 * n / maxDay,
                                   decoration: BoxDecoration(
                                     color: day == Dates.today()
-                                        ? c.primary
-                                        : (n == 0 ? c.cardAlt : c.primarySoft),
+                                        ? c.emerald
+                                        : (n == 0 ? c.cardAlt : c.emeraldSoft),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                 ),
@@ -626,6 +639,159 @@ class _NewDhikrSheetState extends State<_NewDhikrSheet> {
               child: const Text('Add dhikr'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen counter: the whole screen is the button, so you can count
+/// without looking. Closes with the X or the back gesture.
+class TasbihFocusScreen extends StatelessWidget {
+  const TasbihFocusScreen({super.key});
+
+  void _tap(BuildContext context) {
+    final result = context.read<TasbihRepository>().increment();
+    switch (result) {
+      case TasbihTap.counted:
+        HapticFeedback.lightImpact();
+      case TasbihTap.roundComplete || TasbihTap.nextInSequence:
+        HapticFeedback.heavyImpact();
+      case TasbihTap.sequenceComplete:
+        HapticFeedback.vibrate();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final repo = context.watch<TasbihRepository>();
+    final d = repo.current;
+    const fg = Colors.white;
+    return AnnotatedRegion(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        body: Semantics(
+          button: true,
+          label:
+              'Count ${d.latin}. ${repo.count}${repo.target > 0 ? ' of ${repo.target}' : ''}',
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _tap(context),
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFF0B5E4A), Color(0xFF0B2E3D)],
+                ),
+              ),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Close',
+                          color: fg,
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                        const Spacer(),
+                        if (repo.rounds > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 16),
+                            child: Text(
+                              '${repo.rounds} ${repo.rounds == 1 ? 'round' : 'rounds'}',
+                              style: context.text.labelLarge?.copyWith(
+                                color: fg.withValues(alpha: 0.8),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const Spacer(),
+                    if (d.arabic.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          d.arabic,
+                          textAlign: TextAlign.center,
+                          textDirection: TextDirection.rtl,
+                          style: AppTheme.arabic(
+                            fontSize: 36,
+                            color: const Color(0xFFFFE3A6),
+                            height: 1.6,
+                          ),
+                        ),
+                      ),
+                    Text(
+                      d.latin,
+                      style: context.text.titleMedium?.copyWith(
+                        color: fg.withValues(alpha: 0.85),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    SizedBox.square(
+                      dimension: 240,
+                      child: CustomPaint(
+                        painter: _RingPainter(
+                          progress: repo.progress,
+                          target: repo.target,
+                          count: repo.count,
+                          track: fg.withValues(alpha: 0.12),
+                          fill: const Color(0xFFFFE3A6),
+                          bead: const Color(0xFF0B4A3C),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${repo.count}',
+                            style:
+                                AppTheme.font(
+                                  fontSize: 76,
+                                  fontWeight: FontWeight.w800,
+                                  color: fg,
+                                  letterSpacing: -3,
+                                ).copyWith(
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      repo.target > 0 ? 'Goal ${repo.target}' : 'No goal',
+                      style: context.text.labelLarge?.copyWith(
+                        color: fg.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    const Spacer(),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: TextButton.icon(
+                        onPressed: repo.count == 0 ? null : repo.decrement,
+                        style: TextButton.styleFrom(
+                          foregroundColor: fg,
+                          disabledForegroundColor: fg.withValues(alpha: 0.3),
+                        ),
+                        icon: const Icon(Icons.undo_rounded),
+                        label: const Text('Take back one'),
+                      ),
+                    ),
+                    Text(
+                      'Tap anywhere to count',
+                      style: context.text.bodySmall?.copyWith(
+                        color: fg.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

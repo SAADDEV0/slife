@@ -56,7 +56,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ],
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            MediaQuery.paddingOf(context).bottom + 24,
+          ),
           sliver: SliverList.list(
             children: [
               SurfaceCard(

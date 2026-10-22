@@ -29,12 +29,12 @@ uploaded automatically to **your own Google Drive**, with one folder per day.
 - **A page for every day**: title, story, mood (5 levels) and a daily writing prompt. It saves automatically while you type.
 - **Photos & videos**: take them with the camera or pick several at once from the gallery.
 - **Voice notes**: a built-in recorder with a live waveform, pause/resume, and a player with seeking.
-- **Album**: every photo and video from every day, grouped by month in a clean grid, with a full-screen viewer (pinch-zoom, video playback, swipe between items).
+- **Album**: photos, videos and voice notes from every day. View as a grid (2–5 per row, pinch to resize), by day with title and mood, or by month, plus "On this day" memories. Full-screen viewer with pinch-zoom and video playback.
 - **Calendar**: days colored by mood, a mood summary for each month, and you can write for any past day.
 - **Day planner**: split any day into colored time blocks, check them off, see what's on *Now*, and copy the day before.
 - **Task manager**: quick add, due dates, priorities, Today / Upcoming / No date / Done filters, swipe to delete with undo. Tasks due on a day also show in that day's plan.
-- **Tasbih**: a tap counter with targets (33, 99, 100, custom), the after-prayer sequence (33 · 33 · 34), your own dhikr, haptics, and daily stats with a streak.
-- **Quran**: all 114 surahs in Uthmani script with an English or French translation, bookmarks, "continue reading", and adjustable text size. Each surah downloads once from api.alquran.cloud and then works offline, or you can save the whole Quran in one go.
+- **Tasbih**: a tap counter with targets (33, 99, 100, custom), the after-prayer sequence (33 · 33 · 34), your own dhikr, haptics, and daily stats with a streak. A full-screen focus mode lets you count by tapping anywhere.
+- **Quran**: all 114 surahs in Uthmani script, bundled in the app (works offline, opens instantly). Read ayah by ayah or as a continuous mushaf, jump by surah, juz or ayah, search words in Arabic or in the translation, bookmarks and "continue reading". English or French translation downloads once (about 1 MB).
 - **Search** across all titles and stories.
 - **Stats**: writing streak, days written and number of memories.
 - **Google Drive backup**: works offline first, uploads automatically, can be limited to Wi‑Fi, and can restore onto a new phone.

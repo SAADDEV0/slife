@@ -47,12 +47,12 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final hasToday = context.select<JournalRepository, bool>(
       (j) => j.entryFor(Dates.todayKey()) != null,
     );
 
     return Scaffold(
+      extendBody: true,
       body: NotificationListener<UserScrollNotification>(
         onNotification: _onScroll,
         child: IndexedStack(
@@ -88,40 +88,134 @@ class _HomeShellState extends State<HomeShell> {
               ),
             )
           : null,
-      bottomNavigationBar: DecoratedBox(
+      bottomNavigationBar: _FloatingNav(
+        index: _index,
+        onSelect: _select,
+        items: const [
+          _NavItem(
+            Icons.auto_stories_outlined,
+            Icons.auto_stories_rounded,
+            'Journal',
+          ),
+          _NavItem(
+            Icons.event_note_outlined,
+            Icons.event_note_rounded,
+            'Planner',
+          ),
+          _NavItem(Icons.mosque_outlined, Icons.mosque_rounded, 'Deen'),
+          _NavItem(
+            Icons.calendar_month_outlined,
+            Icons.calendar_month_rounded,
+            'Calendar',
+          ),
+          _NavItem(
+            Icons.photo_library_outlined,
+            Icons.photo_library_rounded,
+            'Album',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavItem {
+  const _NavItem(this.icon, this.selectedIcon, this.label);
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+}
+
+/// A floating, rounded navigation bar; pages scroll underneath it.
+class _FloatingNav extends StatelessWidget {
+  const _FloatingNav({
+    required this.index,
+    required this.onSelect,
+    required this.items,
+  });
+
+  final int index;
+  final ValueChanged<int> onSelect;
+  final List<_NavItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(12, 0, 12, bottom > 0 ? bottom : 12),
+      child: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: c.line)),
-        ),
-        child: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: _select,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.auto_stories_outlined),
-              selectedIcon: Icon(Icons.auto_stories_rounded),
-              label: 'Journal',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.event_note_outlined),
-              selectedIcon: Icon(Icons.event_note_rounded),
-              label: 'Planner',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.mosque_outlined),
-              selectedIcon: Icon(Icons.mosque_rounded),
-              label: 'Deen',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.calendar_month_outlined),
-              selectedIcon: Icon(Icons.calendar_month_rounded),
-              label: 'Calendar',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.photo_library_outlined),
-              selectedIcon: Icon(Icons.photo_library_rounded),
-              label: 'Album',
+          color: c.card,
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: c.line.withValues(alpha: 0.8)),
+          boxShadow: [
+            BoxShadow(
+              color: context.isDark
+                  ? Colors.black.withValues(alpha: 0.45)
+                  : const Color(0x1F1B1530),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
             ),
           ],
+        ),
+        child: SizedBox(
+          height: 66,
+          child: Row(
+            children: [
+              for (var i = 0; i < items.length; i++)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: i == index,
+                    label: items[i].label,
+                    excludeSemantics: true,
+                    child: InkResponse(
+                      onTap: () => onSelect(i),
+                      radius: 34,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutCubic,
+                            width: i == index ? 52 : 36,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: i == index
+                                  ? c.primarySoft
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: Icon(
+                              i == index
+                                  ? items[i].selectedIcon
+                                  : items[i].icon,
+                              size: 22,
+                              color: i == index ? c.primary : c.muted,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            items[i].label,
+                            maxLines: 1,
+                            style: context.text.labelSmall?.copyWith(
+                              fontSize: 11,
+                              color: i == index ? c.ink : c.muted,
+                              fontWeight: i == index
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              letterSpacing: 0,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

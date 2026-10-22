@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -7,7 +9,10 @@ import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import 'quran_reader_screen.dart';
 
-/// Quran home: continue reading, bookmarks and the list of surahs.
+enum _Tab { surahs, juz, saved }
+
+/// Quran home: continue reading, search, surahs, juz and bookmarks.
+/// Every list is built lazily so the tab opens instantly.
 class QuranView extends StatefulWidget {
   const QuranView({super.key});
 
@@ -16,7 +21,38 @@ class QuranView extends StatefulWidget {
 }
 
 class _QuranViewState extends State<QuranView> {
+  _Tab _tab = _Tab.surahs;
   String _query = '';
+  Timer? _debounce;
+  Future<List<AyahHit>>? _hits;
+
+  @override
+  void initState() {
+    super.initState();
+    final repo = context.read<QuranRepository>();
+    // Warm up in the background: the text, and a saved translation if any.
+    repo.ensureText();
+    repo.ensureTranslation(download: false);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onQuery(String value) {
+    setState(() => _query = value);
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      setState(() {
+        _hits = value.trim().length >= 3
+            ? context.read<QuranRepository>().search(value)
+            : null;
+      });
+    });
+  }
 
   List<Surah> get _surahs {
     final q = _query.trim().toLowerCase();
@@ -24,137 +60,210 @@ class _QuranViewState extends State<QuranView> {
     String simple(String s) =>
         s.toLowerCase().replaceAll(RegExp(r"[\s\-'ʿʾ]"), '');
     final sq = simple(q);
+    final aq = QuranRepository.normalizeArabic(q);
     return [
       for (final s in Surah.all)
         if ('${s.number}' == q ||
             simple(s.name).contains(sq) ||
             s.meaning.toLowerCase().contains(q) ||
-            s.arabic.contains(q))
+            QuranRepository.normalizeArabic(s.arabic).contains(aq))
           s,
     ];
   }
 
-  Future<void> _download() async {
-    final repo = context.read<QuranRepository>();
-    final messenger = ScaffoldMessenger.of(context);
-    if (repo.isDownloading) {
-      repo.cancelDownload();
-      return;
-    }
-    final ok = await repo.downloadAll();
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            ok
-                ? 'The whole Quran is saved on this phone.'
-                : 'Download stopped. Check your connection and try again.',
+  @override
+  Widget build(BuildContext context) {
+    final repo = context.watch<QuranRepository>();
+    final searching = _query.trim().isNotEmpty;
+
+    return SliverMainAxisGroup(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverList.list(
+            children: [
+              _ContinueCard(last: repo.lastRead),
+              const SizedBox(height: 12),
+              const _TranslationBanner(),
+              TextField(
+                onChanged: _onQuery,
+                onTapOutside: (_) => FocusScope.of(context).unfocus(),
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Search surahs or words in the Quran',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  fillColor: context.colors.card,
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (!searching) ...[
+                PillTabs<_Tab>(
+                  values: _Tab.values,
+                  selected: _tab,
+                  onChanged: (t) => setState(() => _tab = t),
+                  labelOf: (t) => switch (t) {
+                    _Tab.surahs => 'Surahs',
+                    _Tab.juz => 'Juz',
+                    _Tab.saved => 'Saved · ${repo.bookmarks.length}',
+                  },
+                ),
+                const SizedBox(height: 14),
+              ],
+            ],
           ),
         ),
-      );
-  }
-
-  void _showBookmarks() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => ChangeNotifierProvider.value(
-        value: context.read<QuranRepository>(),
-        child: const _BookmarksSheet(),
-      ),
+        if (searching)
+          ..._searchSlivers(context)
+        else
+          switch (_tab) {
+            _Tab.surahs => _CardList(
+              count: Surah.all.length,
+              builder: (context, i) => _SurahTile(
+                surah: Surah.all[i],
+                reading: repo.lastRead?.$1 == i + 1,
+              ),
+            ),
+            _Tab.juz => _JuzList(starts: repo.juzStarts),
+            _Tab.saved => _SavedList(marks: repo.bookmarks),
+          },
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+          sliver: SliverToBoxAdapter(
+            child: Text(
+              'Arabic text: Tanzil Quran Text (Uthmani), tanzil.net.'
+              '${repo.translation == QuranTranslation.none ? '' : ' Translation: ${repo.translation.author}.'}',
+              style: context.text.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ],
     );
   }
+
+  List<Widget> _searchSlivers(BuildContext context) {
+    final surahs = _surahs;
+    return [
+      if (surahs.isNotEmpty) ...[
+        const SliverPadding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverToBoxAdapter(child: SectionLabel('Surahs')),
+        ),
+        _CardList(
+          count: surahs.length,
+          builder: (context, i) => _SurahTile(surah: surahs[i]),
+        ),
+      ],
+      SliverToBoxAdapter(
+        child: FutureBuilder<List<AyahHit>>(
+          future: _hits,
+          builder: (context, snap) {
+            final repo = context.read<QuranRepository>();
+            if (_query.trim().length < 3) return const SizedBox.shrink();
+            if (snap.connectionState != ConnectionState.done) {
+              return const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final hits = snap.data ?? const [];
+            final needsTr =
+                hits.isEmpty &&
+                !QuranRepository.normalizeArabic(_query)
+                    .contains(RegExp('[؀-ۿ]')) &&
+                !repo.hasTranslation;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SectionLabel(
+                    hits.length >= 60
+                        ? 'Ayahs · first 60'
+                        : 'Ayahs · ${hits.length}',
+                  ),
+                  if (hits.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        needsTr
+                            ? 'Download a translation to search by meaning, or type in Arabic.'
+                            : 'No ayah contains “${_query.trim()}”.',
+                        style: context.text.bodySmall,
+                      ),
+                    )
+                  else
+                    for (final h in hits.take(60))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: SurfaceCard(
+                          onTap: () =>
+                              openSurah(context, h.surah, ayah: h.ayah),
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                '${Surah.byNumber(h.surah).name} ${h.surah}:${h.ayah}',
+                                style: context.text.labelSmall?.copyWith(
+                                  color: context.colors.emerald,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                h.text,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                textDirection: RegExp('[؀-ۿ]').hasMatch(h.text)
+                                    ? TextDirection.rtl
+                                    : TextDirection.ltr,
+                                style: RegExp('[؀-ۿ]').hasMatch(h.text)
+                                    ? AppTheme.arabic(
+                                        fontSize: 20,
+                                        color: context.colors.ink,
+                                        height: 1.8,
+                                      )
+                                    : context.text.bodyMedium,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    ];
+  }
+}
+
+/// A lazily built list drawn as one rounded card.
+class _CardList extends StatelessWidget {
+  const _CardList({required this.count, required this.builder});
+
+  final int count;
+  final IndexedWidgetBuilder builder;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final repo = context.watch<QuranRepository>();
-    final last = repo.lastRead;
-    final surahs = _surahs;
-    final available = repo.availableCount;
-
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      sliver: SliverList.list(
-        children: [
-          _ContinueCard(last: last),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _showBookmarks,
-                  icon: const Icon(Icons.bookmark_outline_rounded, size: 20),
-                  label: Text('Bookmarks · ${repo.bookmarks.length}'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed:
-                      available >= Surah.all.length && !repo.isDownloading
-                      ? null
-                      : _download,
-                  icon: repo.isDownloading
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          available >= Surah.all.length
-                              ? Icons.offline_pin_rounded
-                              : Icons.download_rounded,
-                          size: 20,
-                        ),
-                  label: Text(
-                    repo.isDownloading
-                        ? '${repo.downloadDone}/114 · Stop'
-                        : available >= Surah.all.length
-                        ? 'Offline'
-                        : 'Save offline',
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            onChanged: (v) => setState(() => _query = v),
-            onTapOutside: (_) => FocusScope.of(context).unfocus(),
-            decoration: const InputDecoration(
-              hintText: 'Search a surah: name or number',
-              prefixIcon: Icon(Icons.search_rounded),
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (surahs.isEmpty)
-            const EmptyState(
-              icon: Icons.search_off_rounded,
-              title: 'No surah found',
-              message: 'Try a name like "Yasin" or a number from 1 to 114.',
-            )
-          else
-            GroupCard(
-              children: [
-                for (final s in surahs)
-                  _SurahTile(
-                    surah: s,
-                    saved: repo.isAvailable(s.number),
-                    reading: last?.$1 == s.number,
-                  ),
-              ],
-            ),
-          const SizedBox(height: 12),
-          Text(
-            'Text: Tanzil (Uthmani) via alquran.cloud. '
-            'Translation: ${repo.translation.author}.',
-            style: context.text.bodySmall?.copyWith(color: c.muted),
-            textAlign: TextAlign.center,
-          ),
-        ],
+      sliver: DecoratedSliver(
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: c.line.withValues(alpha: 0.7)),
+          boxShadow: c.cardShadow,
+        ),
+        sliver: SliverList.separated(
+          itemCount: count,
+          itemBuilder: builder,
+          separatorBuilder: (_, _) =>
+              Divider(indent: 68, endIndent: 16, color: c.line),
+        ),
       ),
     );
   }
@@ -170,108 +279,285 @@ class _ContinueCard extends StatelessWidget {
     final c = context.colors;
     final surah = Surah.byNumber(last?.$1 ?? 1);
     final ayah = last?.$2 ?? 1;
+    final progress = surah.ayahs == 0 ? 0.0 : ayah / surah.ayahs;
     return SurfaceCard(
-      color: c.primary,
       onTap: () => openSurah(context, surah.number, ayah: ayah),
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            children: [
+              IconBadge(icon: Icons.menu_book_rounded, color: c.emerald),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.menu_book_rounded,
-                      size: 18,
-                      color: c.onPrimary.withValues(alpha: 0.85),
-                    ),
-                    const SizedBox(width: 6),
                     Text(
                       last == null ? 'Start reading' : 'Continue reading',
-                      style: context.text.labelMedium?.copyWith(
-                        color: c.onPrimary.withValues(alpha: 0.85),
-                      ),
+                      style: context.text.labelMedium,
                     ),
+                    Text(surah.name, style: context.text.titleLarge),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  surah.name,
-                  style: context.text.headlineSmall?.copyWith(
-                    color: c.onPrimary,
-                  ),
+              ),
+              Text(
+                surah.arabic,
+                textDirection: TextDirection.rtl,
+                style: AppTheme.arabic(
+                  fontSize: 28,
+                  color: c.emerald,
+                  fontWeight: FontWeight.w700,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Ayah $ayah of ${surah.ayahs}',
-                  style: context.text.bodyMedium?.copyWith(
-                    color: c.onPrimary.withValues(alpha: 0.85),
-                  ),
-                ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              minHeight: 6,
+              color: c.emerald,
+              backgroundColor: c.emeraldSoft,
             ),
           ),
-          Text(
-            surah.arabic,
-            textDirection: TextDirection.rtl,
-            style: AppTheme.arabic(fontSize: 30, color: c.onPrimary),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                'Ayah $ayah of ${surah.ayahs}',
+                style: context.text.bodySmall,
+              ),
+              const Spacer(),
+              Text(
+                last == null ? 'Open' : 'Resume',
+                style: context.text.labelLarge?.copyWith(color: c.emerald),
+              ),
+              Icon(Icons.arrow_forward_rounded, size: 18, color: c.emerald),
+            ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Offers to download the chosen translation, or shows its progress.
+class _TranslationBanner extends StatelessWidget {
+  const _TranslationBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final repo = context.watch<QuranRepository>();
+    final state = repo.translationState;
+    if (state == TranslationState.none || state == TranslationState.ready) {
+      return const SizedBox.shrink();
+    }
+    final downloading = state == TranslationState.downloading;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SurfaceCard(
+        color: c.emeraldSoft,
+        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+        child: Row(
+          children: [
+            Icon(
+              state == TranslationState.failed
+                  ? Icons.wifi_off_rounded
+                  : Icons.translate_rounded,
+              color: c.emerald,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(switch (state) {
+                TranslationState.downloading =>
+                  'Downloading the ${repo.translation.label} translation…',
+                TranslationState.failed =>
+                  'Could not download the translation. Check your connection.',
+                _ =>
+                  'Get the ${repo.translation.label} translation (about 1 MB, once).',
+              }, style: context.text.bodyMedium),
+            ),
+            if (downloading)
+              const Padding(
+                padding: EdgeInsets.all(10),
+                child: SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+              )
+            else
+              TextButton(
+                onPressed: repo.ensureTranslation,
+                style: TextButton.styleFrom(foregroundColor: c.emerald),
+                child: Text(
+                  state == TranslationState.failed ? 'Retry' : 'Download',
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 }
 
 class _SurahTile extends StatelessWidget {
-  const _SurahTile({
-    required this.surah,
-    required this.saved,
-    required this.reading,
-  });
+  const _SurahTile({required this.surah, this.reading = false});
 
   final Surah surah;
-  final bool saved;
   final bool reading;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final s = surah;
-    return ListTile(
+    return InkWell(
       onTap: () => openSurah(context, s.number),
-      leading: SurahNumber(s.number, highlight: reading),
-      title: Text(s.name),
-      subtitle: Text(
-        '${s.meaning} · ${s.ayahs} ayahs',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (saved)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Icon(
-                Icons.offline_pin_rounded,
-                size: 16,
-                color: c.muted.withValues(alpha: 0.6),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
+        child: Row(
+          children: [
+            SurahNumber(s.number, highlight: reading),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.name, style: context.text.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${s.meaning} · ${s.ayahs} ayahs',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.bodySmall,
+                  ),
+                ],
               ),
             ),
-          Text(
-            s.arabic,
-            textDirection: TextDirection.rtl,
-            style: AppTheme.arabic(fontSize: 20, color: c.ink),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Text(
+              s.arabic,
+              textDirection: TextDirection.rtl,
+              style: AppTheme.arabic(fontSize: 21, color: c.ink, height: 1.4),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// The surah number in a rotated rounded square.
+class _JuzList extends StatelessWidget {
+  const _JuzList({required this.starts});
+
+  final List<(int, int)> starts;
+
+  @override
+  Widget build(BuildContext context) {
+    if (starts.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+    return _CardList(
+      count: starts.length,
+      builder: (context, i) {
+        final (s, a) = starts[i];
+        final surah = Surah.byNumber(s);
+        return InkWell(
+          onTap: () => openSurah(context, s, ayah: a),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
+            child: Row(
+              children: [
+                SurahNumber(i + 1),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Juz ${i + 1}', style: context.text.titleSmall),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Starts at ${surah.name} $s:$a',
+                        style: context.text.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: context.colors.muted),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SavedList extends StatelessWidget {
+  const _SavedList({required this.marks});
+
+  final List<QuranBookmark> marks;
+
+  @override
+  Widget build(BuildContext context) {
+    if (marks.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: EmptyState(
+          icon: Icons.bookmark_outline_rounded,
+          title: 'No saved ayahs',
+          message: 'Tap the bookmark on any ayah to keep it here.',
+        ),
+      );
+    }
+    final repo = context.read<QuranRepository>();
+    return _CardList(
+      count: marks.length,
+      builder: (context, i) {
+        final b = marks[i];
+        final s = Surah.byNumber(b.surah);
+        return InkWell(
+          onTap: () => openSurah(context, b.surah, ayah: b.ayah),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+            child: Row(
+              children: [
+                SurahNumber(s.number),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${s.name} · Ayah ${b.ayah}',
+                        style: context.text.titleSmall,
+                      ),
+                      Text(s.meaning, style: context.text.bodySmall),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove bookmark',
+                  icon: const Icon(Icons.bookmark_remove_outlined),
+                  onPressed: () => repo.toggleBookmark(b.surah, b.ayah),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The surah number in an eight-pointed star.
 class SurahNumber extends StatelessWidget {
   const SurahNumber(this.number, {super.key, this.highlight = false});
 
@@ -281,87 +567,31 @@ class SurahNumber extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final fill = highlight ? c.emerald : c.emeraldSoft;
     return SizedBox.square(
-      dimension: 40,
+      dimension: 42,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Transform.rotate(
-            angle: 0.785398,
-            child: Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: highlight ? c.primary : c.primarySoft,
-                borderRadius: BorderRadius.circular(7),
+          for (final angle in const [0.0, 0.785398])
+            Transform.rotate(
+              angle: angle,
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: fill,
+                  borderRadius: BorderRadius.circular(6),
+                ),
               ),
             ),
-          ),
           Text(
             '$number',
             style: context.text.labelSmall?.copyWith(
-              color: highlight ? c.onPrimary : c.primary,
-              fontWeight: FontWeight.w700,
+              color: highlight ? Colors.white : c.emerald,
+              fontWeight: FontWeight.w800,
+              fontSize: number > 99 ? 10.5 : 12,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BookmarksSheet extends StatelessWidget {
-  const _BookmarksSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final repo = context.watch<QuranRepository>();
-    final marks = repo.bookmarks;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.6,
-      maxChildSize: 0.95,
-      builder: (context, scroll) => Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Row(
-              children: [Text('Bookmarks', style: context.text.titleLarge)],
-            ),
-          ),
-          Expanded(
-            child: marks.isEmpty
-                ? const Center(
-                    child: EmptyState(
-                      icon: Icons.bookmark_outline_rounded,
-                      title: 'No bookmarks yet',
-                      message:
-                          'Tap the bookmark icon on an ayah to keep it here.',
-                    ),
-                  )
-                : ListView.builder(
-                    controller: scroll,
-                    itemCount: marks.length,
-                    itemBuilder: (context, i) {
-                      final b = marks[i];
-                      final s = Surah.byNumber(b.surah);
-                      return ListTile(
-                        leading: SurahNumber(s.number),
-                        title: Text('${s.name} · ${b.ayah}'),
-                        subtitle: Text(s.meaning),
-                        trailing: IconButton(
-                          tooltip: 'Remove bookmark',
-                          icon: const Icon(Icons.bookmark_remove_outlined),
-                          onPressed: () => repo.toggleBookmark(b.surah, b.ayah),
-                        ),
-                        onTap: () {
-                          final nav = Navigator.of(context);
-                          nav.pop();
-                          nav.push(surahRoute(b.surah, ayah: b.ayah));
-                        },
-                      );
-                    },
-                  ),
           ),
         ],
       ),

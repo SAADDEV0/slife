@@ -186,26 +186,18 @@ class _PlannerScreenState extends State<PlannerScreen> {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             sliver: SliverToBoxAdapter(
-              child: SegmentedButton<_View>(
-                showSelectedIcon: false,
-                segments: [
-                  const ButtonSegment(
-                    value: _View.day,
-                    icon: Icon(Icons.view_timeline_outlined, size: 18),
-                    label: Text('Day plan'),
-                  ),
-                  ButtonSegment(
-                    value: _View.tasks,
-                    icon: const Icon(Icons.checklist_rounded, size: 18),
-                    label: Text(
-                      repo.openCount == 0
+              child: PillTabs<_View>(
+                values: _View.values,
+                selected: _view,
+                onChanged: (v) => setState(() => _view = v),
+                labelOf: (v) => v == _View.day
+                    ? 'Day plan'
+                    : (repo.openCount == 0
                           ? 'Tasks'
-                          : 'Tasks · ${repo.openCount}',
-                    ),
-                  ),
-                ],
-                selected: {_view},
-                onSelectionChanged: (s) => setState(() => _view = s.first),
+                          : 'Tasks · ${repo.openCount}'),
+                iconOf: (v) => v == _View.day
+                    ? Icons.view_timeline_outlined
+                    : Icons.checklist_rounded,
               ),
             ),
           ),
@@ -213,7 +205,7 @@ class _PlannerScreenState extends State<PlannerScreen> {
             ..._daySlivers(context, repo)
           else
             ..._taskSlivers(context, repo),
-          const SliverToBoxAdapter(child: SizedBox(height: 104)),
+          const SliverToBoxAdapter(child: BottomSpace(extra: 96)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

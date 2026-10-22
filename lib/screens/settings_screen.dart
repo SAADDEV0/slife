@@ -26,7 +26,12 @@ class SettingsScreen extends StatelessWidget {
       slivers: [
         SliverAppBar.large(expandedHeight: 124, title: const Text('Settings')),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            MediaQuery.paddingOf(context).bottom + 24,
+          ),
           sliver: SliverList.list(
             children: [
               const _ProfileCard(),
@@ -79,30 +84,24 @@ class SettingsScreen extends StatelessWidget {
               ],
               const SizedBox(height: 24),
               const SectionLabel('Appearance'),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<ThemeMode>(
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(
-                      value: ThemeMode.system,
-                      icon: Icon(Icons.brightness_auto_outlined, size: 18),
-                      label: Text('System'),
-                    ),
-                    ButtonSegment(
-                      value: ThemeMode.light,
-                      icon: Icon(Icons.light_mode_outlined, size: 18),
-                      label: Text('Light'),
-                    ),
-                    ButtonSegment(
-                      value: ThemeMode.dark,
-                      icon: Icon(Icons.dark_mode_outlined, size: 18),
-                      label: Text('Dark'),
-                    ),
-                  ],
-                  selected: {settings.themeMode},
-                  onSelectionChanged: (s) => settings.setThemeMode(s.first),
-                ),
+              PillTabs<ThemeMode>(
+                values: const [
+                  ThemeMode.system,
+                  ThemeMode.light,
+                  ThemeMode.dark,
+                ],
+                selected: settings.themeMode,
+                onChanged: settings.setThemeMode,
+                labelOf: (m) => switch (m) {
+                  ThemeMode.system => 'System',
+                  ThemeMode.light => 'Light',
+                  ThemeMode.dark => 'Dark',
+                },
+                iconOf: (m) => switch (m) {
+                  ThemeMode.system => Icons.brightness_auto_outlined,
+                  ThemeMode.light => Icons.light_mode_outlined,
+                  ThemeMode.dark => Icons.dark_mode_outlined,
+                },
               ),
               const SizedBox(height: 24),
               const SectionLabel('On this phone'),

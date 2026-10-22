@@ -4,8 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// SLife design tokens, available through `context.colors`.
 ///
-/// The palette is intentionally small: neutral surfaces, one accent
-/// ([primary]) and a few status colors.
+/// Warm neutral surfaces, one brand accent ([primary]), an emerald/gold pair
+/// for the Deen section and a few status colors. Dark mode uses lifted
+/// greys rather than pure black so cards stay distinct from the page.
 @immutable
 class SLifeColors extends ThemeExtension<SLifeColors> {
   const SLifeColors({
@@ -21,6 +22,10 @@ class SLifeColors extends ThemeExtension<SLifeColors> {
     required this.accent,
     required this.success,
     required this.danger,
+    required this.emerald,
+    required this.emeraldSoft,
+    required this.gold,
+    required this.shadow,
   });
 
   /// Page background.
@@ -29,7 +34,7 @@ class SLifeColors extends ThemeExtension<SLifeColors> {
   /// Raised surfaces (cards, sheets, bars).
   final Color card;
 
-  /// Subtle fills (inputs, unselected chips).
+  /// Subtle fills (inputs, unselected chips, tracks).
   final Color cardAlt;
   final Color ink;
   final Color muted;
@@ -47,35 +52,63 @@ class SLifeColors extends ThemeExtension<SLifeColors> {
   final Color success;
   final Color danger;
 
+  /// Deen section accent (Quran, tasbih).
+  final Color emerald;
+  final Color emeraldSoft;
+  final Color gold;
+
+  /// Soft drop shadow under cards (transparent in dark mode).
+  final Color shadow;
+
   static const light = SLifeColors(
-    paper: Color(0xFFF6F6F8),
+    paper: Color(0xFFF4F3EF),
     card: Color(0xFFFFFFFF),
-    cardAlt: Color(0xFFF0F0F3),
-    ink: Color(0xFF16161A),
-    muted: Color(0xFF6E6E78),
-    line: Color(0xFFE6E6EB),
+    cardAlt: Color(0xFFEDEBE6),
+    ink: Color(0xFF16151B),
+    muted: Color(0xFF6B6975),
+    line: Color(0xFFE6E3DC),
     primary: Color(0xFF5B4FE9),
     onPrimary: Color(0xFFFFFFFF),
-    primarySoft: Color(0xFFEDEBFE),
+    primarySoft: Color(0xFFECE9FF),
     accent: Color(0xFFFF7A59),
-    success: Color(0xFF1F9D63),
+    success: Color(0xFF16A06A),
     danger: Color(0xFFE5484D),
+    emerald: Color(0xFF0E8F6E),
+    emeraldSoft: Color(0xFFDDF3EA),
+    gold: Color(0xFFB98522),
+    shadow: Color(0x141B1530),
   );
 
   static const dark = SLifeColors(
-    paper: Color(0xFF0E0E11),
-    card: Color(0xFF18181D),
-    cardAlt: Color(0xFF222228),
-    ink: Color(0xFFF2F2F5),
-    muted: Color(0xFF9C9CA8),
-    line: Color(0xFF2A2A31),
-    primary: Color(0xFF8E85FF),
-    onPrimary: Color(0xFF14112B),
-    primarySoft: Color(0xFF26234A),
+    paper: Color(0xFF111015),
+    card: Color(0xFF1D1C23),
+    cardAlt: Color(0xFF28272F),
+    ink: Color(0xFFF4F3F7),
+    muted: Color(0xFFA3A0AE),
+    line: Color(0xFF302E38),
+    primary: Color(0xFF968DFF),
+    onPrimary: Color(0xFF15122E),
+    primarySoft: Color(0xFF2B2752),
     accent: Color(0xFFFF8E6E),
     success: Color(0xFF3DD68C),
     danger: Color(0xFFFF6B6B),
+    emerald: Color(0xFF45D3A6),
+    emeraldSoft: Color(0xFF143B31),
+    gold: Color(0xFFE7BE63),
+    shadow: Color(0x00000000),
   );
+
+  /// Card shadow for [BoxDecoration.boxShadow].
+  List<BoxShadow> get cardShadow => shadow.a == 0
+      ? const []
+      : [
+          BoxShadow(color: shadow, blurRadius: 18, offset: const Offset(0, 6)),
+          BoxShadow(
+            color: shadow.withValues(alpha: shadow.a * 0.6),
+            blurRadius: 2,
+            offset: const Offset(0, 1),
+          ),
+        ];
 
   @override
   SLifeColors copyWith({
@@ -91,6 +124,10 @@ class SLifeColors extends ThemeExtension<SLifeColors> {
     Color? accent,
     Color? success,
     Color? danger,
+    Color? emerald,
+    Color? emeraldSoft,
+    Color? gold,
+    Color? shadow,
   }) {
     return SLifeColors(
       paper: paper ?? this.paper,
@@ -105,6 +142,10 @@ class SLifeColors extends ThemeExtension<SLifeColors> {
       accent: accent ?? this.accent,
       success: success ?? this.success,
       danger: danger ?? this.danger,
+      emerald: emerald ?? this.emerald,
+      emeraldSoft: emeraldSoft ?? this.emeraldSoft,
+      gold: gold ?? this.gold,
+      shadow: shadow ?? this.shadow,
     );
   }
 
@@ -125,6 +166,10 @@ class SLifeColors extends ThemeExtension<SLifeColors> {
       accent: mix(accent, other.accent),
       success: mix(success, other.success),
       danger: mix(danger, other.danger),
+      emerald: mix(emerald, other.emerald),
+      emeraldSoft: mix(emeraldSoft, other.emeraldSoft),
+      gold: mix(gold, other.gold),
+      shadow: mix(shadow, other.shadow),
     );
   }
 }
@@ -169,22 +214,16 @@ class AppTheme {
     );
   }
 
-  /// Typeface for Arabic text: Quran and dhikr (Amiri).
+  /// Typeface for Arabic text: Quran and dhikr (Amiri, bundled with the app
+  /// so it works offline and never pops in late).
   static TextStyle arabic({
     double? fontSize,
     FontWeight fontWeight = FontWeight.w400,
     Color? color,
     double? height,
   }) {
-    if (!useGoogleFonts) {
-      return TextStyle(
-        fontSize: fontSize,
-        fontWeight: fontWeight,
-        color: color,
-        height: height,
-      );
-    }
-    return GoogleFonts.amiri(
+    return TextStyle(
+      fontFamily: 'Amiri',
       fontSize: fontSize,
       fontWeight: fontWeight,
       color: color,
@@ -227,37 +266,37 @@ class AppTheme {
 
     final text = TextTheme(
       displaySmall: font(
-        fontSize: 32,
-        fontWeight: FontWeight.w700,
+        fontSize: 34,
+        fontWeight: FontWeight.w800,
         color: c.ink,
-        height: 1.15,
-        letterSpacing: -0.8,
+        height: 1.1,
+        letterSpacing: -1.0,
       ),
       headlineMedium: font(
-        fontSize: 28,
-        fontWeight: FontWeight.w700,
+        fontSize: 30,
+        fontWeight: FontWeight.w800,
         color: c.ink,
-        height: 1.2,
-        letterSpacing: -0.6,
+        height: 1.15,
+        letterSpacing: -0.9,
       ),
       headlineSmall: font(
         fontSize: 22,
         fontWeight: FontWeight.w700,
         color: c.ink,
         height: 1.25,
-        letterSpacing: -0.4,
+        letterSpacing: -0.5,
       ),
       titleLarge: font(
         fontSize: 19,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
         color: c.ink,
-        letterSpacing: -0.2,
+        letterSpacing: -0.3,
       ),
       titleMedium: font(
         fontSize: 16,
         fontWeight: FontWeight.w600,
         color: c.ink,
-        letterSpacing: -0.1,
+        letterSpacing: -0.15,
       ),
       titleSmall: font(fontSize: 14, fontWeight: FontWeight.w600, color: c.ink),
       bodyLarge: font(fontSize: 16.5, color: c.ink, height: 1.6),
@@ -287,6 +326,9 @@ class AppTheme {
     final rounded14 = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(14),
     );
+    final rounded16 = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+    );
 
     return ThemeData(
       useMaterial3: true,
@@ -296,6 +338,7 @@ class AppTheme {
       canvasColor: c.paper,
       textTheme: text,
       extensions: [c],
+      splashFactory: InkSparkle.splashFactory,
       appBarTheme: AppBarTheme(
         backgroundColor: c.paper,
         foregroundColor: c.ink,
@@ -314,28 +357,13 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         indicatorColor: c.primarySoft,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        labelTextStyle: WidgetStateProperty.resolveWith(
-          (s) => font(
-            fontSize: 12,
-            fontWeight: s.contains(WidgetState.selected)
-                ? FontWeight.w600
-                : FontWeight.w500,
-            color: s.contains(WidgetState.selected) ? c.ink : c.muted,
-          ),
-        ),
-        iconTheme: WidgetStateProperty.resolveWith(
-          (s) => IconThemeData(
-            size: 24,
-            color: s.contains(WidgetState.selected) ? c.primary : c.muted,
-          ),
-        ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: c.primary,
         foregroundColor: c.onPrimary,
-        elevation: 2,
-        highlightElevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        elevation: 3,
+        highlightElevation: 5,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         extendedTextStyle: text.labelLarge,
       ),
       iconTheme: IconThemeData(color: c.ink),
@@ -345,7 +373,7 @@ class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: c.line),
         ),
       ),
@@ -353,16 +381,18 @@ class AppTheme {
         filled: true,
         fillColor: c.cardAlt,
         hintStyle: text.bodyMedium?.copyWith(color: c.muted),
+        prefixIconColor: c.muted,
+        suffixIconColor: c.muted,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
-          vertical: 14,
+          vertical: 15,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(color: c.primary, width: 1.5),
         ),
       ),
@@ -373,18 +403,19 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(0, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          shape: rounded14,
+          minimumSize: const Size(0, 50),
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          shape: rounded16,
           textStyle: text.labelLarge,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: c.ink,
+          backgroundColor: c.card,
           minimumSize: const Size(0, 48),
           side: BorderSide(color: c.line),
-          shape: rounded14,
+          shape: rounded16,
           textStyle: text.labelLarge,
         ),
       ),
@@ -395,6 +426,9 @@ class AppTheme {
           shape: rounded14,
           textStyle: text.labelLarge,
         ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(foregroundColor: c.ink),
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
@@ -412,6 +446,22 @@ class AppTheme {
           shape: WidgetStatePropertyAll(rounded14),
         ),
       ),
+      chipTheme: ChipThemeData(
+        backgroundColor: c.card,
+        selectedColor: c.primarySoft,
+        disabledColor: c.cardAlt,
+        checkmarkColor: c.primary,
+        deleteIconColor: c.muted,
+        side: BorderSide(color: c.line),
+        shape: const StadiumBorder(),
+        labelStyle: text.labelLarge?.copyWith(fontSize: 14, color: c.ink),
+        secondaryLabelStyle: text.labelLarge?.copyWith(
+          fontSize: 14,
+          color: c.primary,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        iconTheme: IconThemeData(color: c.muted, size: 18),
+      ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected) ? Colors.white : c.muted,
@@ -423,8 +473,14 @@ class AppTheme {
           (s) => s.contains(WidgetState.selected) ? c.primary : c.line,
         ),
       ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: c.primary,
+        inactiveTrackColor: c.cardAlt,
+        thumbColor: c.primary,
+      ),
       listTileTheme: ListTileThemeData(
         iconColor: c.muted,
+        textColor: c.ink,
         titleTextStyle: text.bodyLarge?.copyWith(
           fontSize: 15.5,
           fontWeight: FontWeight.w500,
@@ -441,28 +497,68 @@ class AppTheme {
           color: isDark ? c.ink : Colors.white,
         ),
         actionTextColor: isDark ? c.primary : const Color(0xFFB7B0FF),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: c.card,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
         titleTextStyle: text.titleLarge,
         contentTextStyle: text.bodyMedium?.copyWith(color: c.muted),
       ),
-      bottomSheetTheme: BottomSheetThemeData(
+      datePickerTheme: DatePickerThemeData(
         backgroundColor: c.card,
         surfaceTintColor: Colors.transparent,
+        headerBackgroundColor: c.primarySoft,
+        headerForegroundColor: c.primary,
+        dayForegroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.onPrimary : c.ink,
+        ),
+        dayBackgroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.primary : null,
+        ),
+        todayForegroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.onPrimary : c.primary,
+        ),
+        todayBorder: BorderSide(color: c.primary),
+        yearForegroundColor: WidgetStatePropertyAll(c.ink),
+        weekdayStyle: text.labelSmall,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      ),
+      timePickerTheme: TimePickerThemeData(
+        backgroundColor: c.card,
+        hourMinuteColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.primarySoft : c.cardAlt,
+        ),
+        hourMinuteTextColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.primary : c.ink,
+        ),
+        dialBackgroundColor: c.cardAlt,
+        dialHandColor: c.primary,
+        dialTextColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.onPrimary : c.ink,
+        ),
+        dayPeriodColor: c.primarySoft,
+        dayPeriodTextColor: c.ink,
+        entryModeIconColor: c.muted,
+        helpTextStyle: text.labelMedium,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: c.card,
+        modalBackgroundColor: c.card,
+        surfaceTintColor: Colors.transparent,
         dragHandleColor: c.line,
+        showDragHandle: true,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: c.card,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           side: BorderSide(color: c.line),
         ),
         textStyle: text.bodyMedium,
@@ -476,6 +572,15 @@ class AppTheme {
         color: c.primary,
         linearTrackColor: c.primarySoft,
         circularTrackColor: c.primarySoft,
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: isDark ? c.cardAlt : c.ink,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        textStyle: text.bodySmall?.copyWith(
+          color: isDark ? c.ink : Colors.white,
+        ),
       ),
     );
   }

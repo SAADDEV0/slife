@@ -481,24 +481,25 @@ class _TaskEditorState extends State<_TaskEditor> {
         const SizedBox(height: 18),
         Text('Priority', style: context.text.labelMedium),
         const SizedBox(height: 8),
-        SegmentedButton<TaskPriority>(
-          showSelectedIcon: false,
-          segments: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
             for (final p in TaskPriority.values)
-              ButtonSegment(
-                value: p,
-                label: Text(p == TaskPriority.none ? 'None' : p.label),
-                icon: p == TaskPriority.none
+              ChoiceChip(
+                showCheckmark: false,
+                avatar: p == TaskPriority.none
                     ? null
                     : Icon(
                         Icons.flag_rounded,
                         size: 16,
                         color: priorityColor(context, p),
                       ),
+                label: Text(p == TaskPriority.none ? 'None' : p.label),
+                selected: _priority == p,
+                onSelected: (_) => setState(() => _priority = p),
               ),
           ],
-          selected: {_priority},
-          onSelectionChanged: (s) => setState(() => _priority = s.first),
         ),
         const SizedBox(height: 20),
         FilledButton(

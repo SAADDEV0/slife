@@ -21,6 +21,8 @@ import 'package:slife/data/tasbih_repository.dart';
 import 'package:slife/models/planner.dart';
 import 'package:slife/screens/deen_screen.dart';
 import 'package:slife/screens/planner_screen.dart';
+import 'package:slife/screens/quran_reader_screen.dart';
+import 'package:slife/screens/tasbih_view.dart';
 import 'package:slife/data/media_storage.dart';
 import 'package:slife/models/journal_entry.dart';
 import 'package:slife/models/media_item.dart';
@@ -63,6 +65,10 @@ Future<void> _loadFonts() async {
     '$fonts/segoeuib.ttf',
   ]);
   await load('SLifeEmoji', ['$fonts/seguiemj.ttf']);
+  await load('Amiri', [
+    'assets/fonts/Amiri-Regular.ttf',
+    'assets/fonts/Amiri-Bold.ttf',
+  ]);
   await load('MaterialIcons', [
     '$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
   ]);
@@ -299,6 +305,7 @@ Widget _app({
   ThemeMode mode = ThemeMode.light,
   PlannerRepository? planner,
   TasbihRepository? tasbih,
+  QuranRepository? quran,
 }) {
   final auth = AuthService(settings);
   final sync = SyncService(
@@ -316,7 +323,7 @@ Widget _app({
       ChangeNotifierProvider.value(value: sync),
       ChangeNotifierProvider.value(value: planner ?? _samplePlanner()),
       ChangeNotifierProvider.value(value: tasbih ?? _sampleTasbih()),
-      ChangeNotifierProvider(create: (_) => QuranRepository.memory()),
+      ChangeNotifierProvider.value(value: quran ?? QuranRepository.memory()),
     ],
     child: MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -375,6 +382,7 @@ void main() {
     Future<void> Function()? before,
     bool skipToday = false,
     TasbihRepository? tasbih,
+    QuranLayout quranLayout = QuranLayout.verses,
   }) async {
     debugDisableShadows = false; // Real, blurred shadows in screenshots.
     tester.view.physicalSize = _size * 3;
@@ -401,6 +409,8 @@ void main() {
         journal: journal,
         mode: mode,
         tasbih: tasbih,
+        quran: QuranRepository.memory(lastRead: (2, 255))
+          ..setLayout(quranLayout),
       ),
     );
     await _settle(tester);
@@ -471,7 +481,14 @@ void main() {
   );
   testWidgets(
     'tasbih',
-    (t) => shoot(t, '13_tasbih', const Scaffold(body: DeenScreen())),
+    (t) => shoot(
+      t,
+      '13_tasbih',
+      const Scaffold(body: DeenScreen()),
+      before: () async {
+        await t.tap(find.text('Tasbih'));
+      },
+    ),
   );
   testWidgets(
     'quran',
@@ -480,10 +497,64 @@ void main() {
       '14_quran',
       const Scaffold(body: DeenScreen()),
       mode: ThemeMode.dark,
+    ),
+  );
+  testWidgets(
+    'quran reader',
+    (t) => shoot(t, '15_quran_reader', const QuranReaderScreen(surah: 2)),
+  );
+  testWidgets(
+    'quran mushaf dark',
+    (t) => shoot(
+      t,
+      '16_quran_mushaf_dark',
+      const QuranReaderScreen(surah: 36),
+      mode: ThemeMode.dark,
+      quranLayout: QuranLayout.mushaf,
+    ),
+  );
+  testWidgets(
+    'album by day',
+    (t) => shoot(
+      t,
+      '17_album_days',
+      const Scaffold(body: AlbumScreen()),
       before: () async {
-        await t.tap(find.text('Quran'));
+        await t.tap(find.byTooltip('View'));
+        await t.pumpAndSettle();
+        await t.tap(find.text('By day'));
       },
     ),
+  );
+  testWidgets(
+    'tasks dark',
+    (t) => shoot(
+      t,
+      '18_tasks_dark',
+      const Scaffold(body: PlannerScreen()),
+      mode: ThemeMode.dark,
+      before: () async {
+        await t.tap(find.text('Tasks · 4'));
+      },
+    ),
+  );
+  testWidgets(
+    'task sheet dark',
+    (t) => shoot(
+      t,
+      '19_task_sheet_dark',
+      const Scaffold(body: PlannerScreen()),
+      mode: ThemeMode.dark,
+      before: () async {
+        await t.tap(find.text('Tasks · 4'));
+        await t.pumpAndSettle();
+        await t.tap(find.text('Call the bank'));
+      },
+    ),
+  );
+  testWidgets(
+    'tasbih focus',
+    (t) => shoot(t, '20_tasbih_focus', const TasbihFocusScreen()),
   );
   testWidgets(
     'album dark',

@@ -12,7 +12,7 @@ class SurfaceCard extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.padding = const EdgeInsets.all(16),
-    this.radius = 18,
+    this.radius = 20,
     this.color,
   });
 
@@ -26,17 +26,28 @@ class SurfaceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Material(
-      color: color ?? c.card,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
+    final fill = color ?? c.card;
+    return DecoratedBox(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(radius),
-        side: BorderSide(color: c.line),
+        boxShadow: fill == c.card ? c.cardShadow : const [],
       ),
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Padding(padding: padding, child: child),
+      child: Material(
+        color: fill,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radius),
+          side: BorderSide(
+            color: fill == c.card
+                ? c.line.withValues(alpha: 0.7)
+                : Colors.transparent,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Padding(padding: padding, child: child),
+        ),
       ),
     );
   }
@@ -141,9 +152,11 @@ class SectionLabel extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              text,
-              style: context.text.titleSmall?.copyWith(
+              text.toUpperCase(),
+              style: context.text.labelSmall?.copyWith(
                 color: context.colors.muted,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.9,
               ),
             ),
           ),
@@ -214,20 +227,26 @@ class GroupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Material(
-      color: c.card,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: c.line),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: c.cardShadow,
       ),
-      child: Column(
-        children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) Divider(indent: 16, endIndent: 16, color: c.line),
-            children[i],
+      child: Material(
+        color: c.card,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: c.line.withValues(alpha: 0.7)),
+        ),
+        child: Column(
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) Divider(indent: 16, endIndent: 16, color: c.line),
+              children[i],
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -283,4 +302,156 @@ class WaveformPainter extends CustomPainter {
       old.levels != levels ||
       old.activeColor != activeColor ||
       old.inactiveColor != inactiveColor;
+}
+
+/// A sliding pill switcher (replaces boxy segmented buttons).
+class PillTabs<T> extends StatelessWidget {
+  const PillTabs({
+    super.key,
+    required this.values,
+    required this.selected,
+    required this.onChanged,
+    required this.labelOf,
+    this.iconOf,
+  });
+
+  final List<T> values;
+  final T selected;
+  final ValueChanged<T> onChanged;
+  final String Function(T value) labelOf;
+  final IconData Function(T value)? iconOf;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final index = values.indexOf(selected);
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: context.isDark ? c.card : c.cardAlt,
+        borderRadius: BorderRadius.circular(16),
+        border: context.isDark ? Border.all(color: c.line) : null,
+      ),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final w = box.maxWidth / values.length;
+          return Stack(
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                left: w * index,
+                top: 0,
+                bottom: 0,
+                width: w,
+                child: Container(
+                  decoration: BoxDecoration(
+                    // In dark mode the selected pill is lighter than its track.
+                    color: context.isDark
+                        ? Color.lerp(c.cardAlt, c.ink, 0.1)
+                        : c.card,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      if (!context.isDark)
+                        BoxShadow(
+                          color: c.shadow,
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  for (final v in values)
+                    Expanded(
+                      child: Semantics(
+                        button: true,
+                        selected: v == selected,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: v == selected ? null : () => onChanged(v),
+                          child: Center(
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 200),
+                              style: context.text.labelLarge!.copyWith(
+                                fontSize: 14,
+                                color: v == selected ? c.ink : c.muted,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (iconOf != null) ...[
+                                    Icon(
+                                      iconOf!(v),
+                                      size: 17,
+                                      color: v == selected
+                                          ? c.primary
+                                          : c.muted,
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
+                                  Flexible(
+                                    child: Text(
+                                      labelOf(v),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Space at the end of a scrolling page so content clears the floating
+/// navigation bar (the Scaffold reports it as bottom padding).
+class BottomSpace extends StatelessWidget {
+  const BottomSpace({super.key, this.extra = 24});
+
+  final double extra;
+
+  @override
+  Widget build(BuildContext context) =>
+      SizedBox(height: MediaQuery.paddingOf(context).bottom + extra);
+}
+
+/// A rounded tinted square holding an icon.
+class IconBadge extends StatelessWidget {
+  const IconBadge({
+    super.key,
+    required this.icon,
+    required this.color,
+    this.size = 38,
+  });
+
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: context.isDark ? 0.2 : 0.12),
+        borderRadius: BorderRadius.circular(size * 0.32),
+      ),
+      child: Icon(icon, size: size * 0.53, color: color),
+    );
+  }
 }

@@ -132,7 +132,7 @@ class JournalScreen extends StatelessWidget {
                   )
                 else
                   ...timeline,
-                const SizedBox(height: 96),
+                const BottomSpace(extra: 88),
               ],
             ),
           ),

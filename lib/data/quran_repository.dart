@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
@@ -22,6 +24,17 @@ enum QuranTranslation {
   final String author;
 }
 
+/// How the reader lays out a surah.
+enum QuranLayout {
+  /// One card per ayah, with its translation.
+  verses,
+
+  /// Continuous Arabic text, like a printed mushaf.
+  mushaf,
+}
+
+enum TranslationState { none, missing, downloading, ready, failed }
+
 @immutable
 class QuranBookmark {
   const QuranBookmark(this.surah, this.ayah, this.createdAt);
@@ -31,10 +44,23 @@ class QuranBookmark {
   final DateTime createdAt;
 }
 
-/// Quran text, bookmarks and reading position.
+/// One search hit.
+@immutable
+class AyahHit {
+  const AyahHit(this.surah, this.ayah, this.text);
+
+  final int surah;
+  final int ayah;
+
+  /// The text that matched (translation or Arabic).
+  final String text;
+}
+
+/// Quran text, translations, bookmarks and reading position.
 ///
-/// The surah list is bundled; the text of each surah is downloaded once from
-/// api.alquran.cloud and kept on the device, so it opens offline afterwards.
+/// The Arabic text (Tanzil, Uthmani) ships inside the app and is decoded off
+/// the UI thread on first use. A translation is downloaded once as a whole
+/// (about 1 MB) from api.alquran.cloud and kept on the device.
 class QuranRepository extends ChangeNotifier {
   QuranRepository(Database db, this.cacheDir, {http.Client? client})
     : _db = db,
@@ -43,13 +69,13 @@ class QuranRepository extends ChangeNotifier {
   /// In-memory repository for tests and previews (no network, no disk).
   @visibleForTesting
   QuranRepository.memory({
-    Map<int, List<Ayah>> surahs = const {},
     (int, int)? lastRead,
+    QuranTranslation translation = QuranTranslation.none,
   }) : _db = null,
        _client = null,
        cacheDir = null {
-    _loaded.addAll(surahs);
     _lastRead = lastRead;
+    _translation = translation;
   }
 
   final Database? _db;
@@ -57,24 +83,26 @@ class QuranRepository extends ChangeNotifier {
   final String? cacheDir;
 
   static const _api = 'https://api.alquran.cloud/v1';
+  static const _asset = 'assets/quran/uthmani.json';
   static const _lastKey = 'quran.last';
   static const _prefsKey = 'quran.prefs';
 
-  final Map<int, List<Ayah>> _loaded = {};
-  final Set<int> _cached = {};
   final Map<(int, int), QuranBookmark> _bookmarks = {};
   (int, int)? _lastRead;
   QuranTranslation _translation = QuranTranslation.english;
+  QuranLayout _layout = QuranLayout.verses;
   double _fontScale = 1;
 
-  final Map<int, Future<List<Ayah>>> _inFlight = {};
+  _QuranText? _text;
+  Future<_QuranText>? _textLoading;
+  List<List<String>>? _tr;
+  QuranTranslation? _trFor;
+  TranslationState _trState = TranslationState.none;
+  Future<void>? _trLoading;
+  List<List<String>>? _searchIndex;
 
   /// Called after every change worth backing up (bookmarks, reading spot).
   VoidCallback? onLocalChange;
-
-  int? _downloading;
-  int _downloadDone = 0;
-  bool _cancelDownload = false;
 
   Future<void> load() async {
     final db = _db;
@@ -107,10 +135,21 @@ class QuranRepository extends ChangeNotifier {
           (t) => t.name == m['translation'],
           orElse: () => QuranTranslation.english,
         );
+        _layout = QuranLayout.values.firstWhere(
+          (l) => l.name == m['layout'],
+          orElse: () => QuranLayout.verses,
+        );
         _fontScale = (m['fontScale'] as num?)?.toDouble() ?? 1;
       } catch (_) {}
     }
-    await _scanCache();
+    // The old per-surah cache is no longer used.
+    final dir = cacheDir;
+    if (dir != null) {
+      for (final old in ['ar', 'en.sahih', 'fr.hamidullah']) {
+        final d = Directory(p.join(dir, old));
+        if (await d.exists()) unawaited(d.delete(recursive: true));
+      }
+    }
     notifyListeners();
   }
 
@@ -129,14 +168,23 @@ class QuranRepository extends ChangeNotifier {
   // ------------------------------------------------------------ settings --
 
   QuranTranslation get translation => _translation;
+  QuranLayout get layout => _layout;
   double get fontScale => _fontScale;
 
   Future<void> setTranslation(QuranTranslation value) async {
     if (value == _translation) return;
-    cancelDownload();
     _translation = value;
-    _loaded.clear();
-    await _scanCache();
+    _tr = null;
+    _trFor = null;
+    _trState = TranslationState.none;
+    _searchIndex = null;
+    notifyListeners();
+    await _savePrefs();
+  }
+
+  Future<void> setLayout(QuranLayout value) async {
+    if (value == _layout) return;
+    _layout = value;
     notifyListeners();
     await _savePrefs();
   }
@@ -149,7 +197,11 @@ class QuranRepository extends ChangeNotifier {
 
   Future<void> _savePrefs() => _setKv(
     _prefsKey,
-    jsonEncode({'translation': _translation.name, 'fontScale': _fontScale}),
+    jsonEncode({
+      'translation': _translation.name,
+      'layout': _layout.name,
+      'fontScale': _fontScale,
+    }),
   );
 
   // --------------------------------------------------------- reading spot --
@@ -245,158 +297,244 @@ class QuranRepository extends ChangeNotifier {
 
   // ---------------------------------------------------------------- text --
 
-  bool isAvailable(int surah) =>
-      _loaded.containsKey(surah) || _cached.contains(surah);
+  bool get isTextReady => _text != null;
 
-  int get availableCount =>
-      {..._loaded.keys, ..._cached}.length.clamp(0, Surah.all.length);
-
-  List<Ayah>? loaded(int surah) => _loaded[surah];
-
-  String get _editionTag =>
-      _translation == QuranTranslation.none ? 'ar' : _translation.edition;
-
-  File? _file(int surah) {
-    final dir = cacheDir;
-    if (dir == null) return null;
-    return File(p.join(dir, _editionTag, '$surah.json'));
-  }
-
-  Future<void> _scanCache() async {
-    _cached.clear();
-    final dir = cacheDir;
-    if (dir == null) return;
-    final folder = Directory(p.join(dir, _editionTag));
-    if (!await folder.exists()) return;
-    await for (final f in folder.list()) {
-      final n = int.tryParse(p.basenameWithoutExtension(f.path));
-      if (n != null) _cached.add(n);
-    }
-  }
-
-  /// The ayahs of [surah], from memory, the device, or the network.
-  /// Concurrent calls for the same surah share one download.
-  Future<List<Ayah>> surah(int surah) {
-    final inMemory = _loaded[surah];
-    if (inMemory != null) return Future.value(inMemory);
-    return _inFlight[surah] ??= _fetch(surah)
-        .whenComplete(() => _inFlight.remove(surah));
-  }
-
-  Future<List<Ayah>> _fetch(int surah) async {
-    final inMemory = _loaded[surah];
-    if (inMemory != null) return inMemory;
-
-    final file = _file(surah);
-    if (file != null && await file.exists()) {
-      try {
-        final ayahs = _decode(jsonDecode(await file.readAsString()) as Map);
-        _loaded[surah] = ayahs;
-        return ayahs;
-      } catch (_) {
-        await file.delete();
-      }
-    }
-
-    final client = _client;
-    if (client == null) throw StateError('Surah $surah is not available');
-    final editions = [
-      'quran-uthmani',
-      if (_translation != QuranTranslation.none) _translation.edition,
-    ].join(',');
-    final res = await client
-        .get(Uri.parse('$_api/surah/$surah/editions/$editions'))
-        .timeout(const Duration(seconds: 30));
-    if (res.statusCode != 200) {
-      throw HttpException('Quran download failed (${res.statusCode})');
-    }
-    final data =
-        (jsonDecode(utf8.decode(res.bodyBytes)) as Map)['data'] as List;
-    List<String> texts(int i) => [
-      for (final a in (data[i] as Map)['ayahs'] as List)
-        (a as Map)['text'] as String,
-    ];
-    final arabic = texts(0);
-    final compact = {
-      'ar': [
-        for (var i = 0; i < arabic.length; i++)
-          i == 0 ? _stripBasmala(surah, arabic[0]) : arabic[i],
-      ],
-      'tr': data.length > 1 ? texts(1) : const <String>[],
-    };
-    if (file != null) {
-      // Write then rename, so a killed app never leaves half a file.
-      await file.parent.create(recursive: true);
-      final tmp = File('${file.path}.tmp');
-      await tmp.writeAsString(jsonEncode(compact), flush: true);
-      await tmp.rename(file.path);
-      _cached.add(surah);
-    }
-    final ayahs = _decode(compact);
-    _loaded[surah] = ayahs;
+  /// Loads the bundled Arabic text (once; decoded off the UI thread).
+  Future<void> ensureText() async {
+    if (_text != null) return;
+    _text = await (_textLoading ??= _loadText());
     notifyListeners();
-    return ayahs;
   }
 
-  static List<Ayah> _decode(Map json) {
-    final ar = (json['ar'] as List).cast<String>();
-    final tr = (json['tr'] as List).cast<String>();
+  Future<_QuranText> _loadText() async {
+    final raw = await rootBundle.loadString(_asset, cache: false);
+    // Small enough to decode inline in tests; big enough to matter on phones.
+    return _db == null ? _QuranText.parse(raw) : compute(_QuranText.parse, raw);
+  }
+
+  /// Juz (1–30) that [surah]:[ayah] belongs to.
+  int juzOf(int surah, int ayah) {
+    final starts = _text?.juz ?? const <(int, int)>[];
+    var juz = 1;
+    for (var i = 0; i < starts.length; i++) {
+      final (s, a) = starts[i];
+      if (s < surah || (s == surah && a <= ayah)) juz = i + 1;
+    }
+    return juz;
+  }
+
+  /// First ayah of each juz.
+  List<(int, int)> get juzStarts => _text?.juz ?? const [];
+
+  /// The juz that begins at [surah]:[ayah], if any.
+  int? juzStartingAt(int surah, int ayah) {
+    final i = juzStarts.indexOf((surah, ayah));
+    return i < 0 ? null : i + 1;
+  }
+
+  bool isSajda(int surah, int ayah) =>
+      _text?.sajda.contains((surah, ayah)) ?? false;
+
+  /// The ayahs of [surah] (Arabic, plus the translation when it is ready).
+  /// Call [ensureText] first.
+  List<Ayah> ayahs(int surah) {
+    final text = _text;
+    if (text == null) return const [];
+    final ar = text.surahs[surah - 1];
+    final tr = _tr != null && _trFor == _translation ? _tr![surah - 1] : null;
     return [
       for (var i = 0; i < ar.length; i++)
-        Ayah(i + 1, ar[i], i < tr.length ? tr[i] : ''),
+        Ayah(
+          i + 1,
+          i == 0 ? _stripBasmala(surah, ar[0]) : ar[i],
+          tr != null && i < tr.length ? tr[i] : '',
+        ),
     ];
   }
 
   /// The Uthmani text puts the Basmala in front of the first ayah of most
   /// surahs. SLife shows it as a header instead.
   static String _stripBasmala(int surah, String text) {
-    if (!Surah.byNumber(surah).hasBasmalaHeader) return text;
-    final words = text.replaceAll('﻿', '').trim().split(' ');
+    final clean = text.replaceAll('﻿', '').trim();
+    if (!Surah.byNumber(surah).hasBasmalaHeader) return clean;
+    final words = clean.split(' ');
     if (words.length > 4 && words.first.startsWith('بِسْمِ')) {
       return words.skip(4).join(' ').trim();
     }
-    return text;
+    return clean;
   }
 
-  // ------------------------------------------------------ offline download --
+  // --------------------------------------------------------- translation --
 
-  /// Surah currently being downloaded by [downloadAll], or null.
-  int? get downloading => _downloading;
-  int get downloadDone => _downloadDone;
-  bool get isDownloading => _downloading != null;
+  TranslationState get translationState =>
+      _translation == QuranTranslation.none ? TranslationState.none : _trState;
 
-  /// Saves every surah on the device. Returns false if it stopped early.
-  Future<bool> downloadAll() async {
-    if (isDownloading) return false;
-    _cancelDownload = false;
-    _downloadDone = 0;
-    var ok = true;
-    for (final s in Surah.all) {
-      if (_cancelDownload) {
-        ok = false;
-        break;
-      }
-      _downloading = s.number;
-      notifyListeners();
-      try {
-        if (!_cached.contains(s.number)) await surah(s.number);
-        _loaded.remove(s.number); // keep memory small
-      } catch (_) {
-        ok = false;
-        break;
-      }
-      _downloadDone++;
+  bool get hasTranslation =>
+      _tr != null && _trFor == _translation && _translation.edition.isNotEmpty;
+
+  File? _trFile(QuranTranslation t) {
+    final dir = cacheDir;
+    if (dir == null || t.edition.isEmpty) return null;
+    return File(p.join(dir, 'translations', '${t.edition}.json'));
+  }
+
+  /// Loads the chosen translation from the device, downloading it once if
+  /// [download] is true.
+  Future<void> ensureTranslation({bool download = true}) {
+    if (_translation == QuranTranslation.none || hasTranslation) {
+      return Future.value();
     }
-    _downloading = null;
-    notifyListeners();
-    return ok;
+    return _trLoading ??= _loadTranslation(
+      _translation,
+      download,
+    ).whenComplete(() => _trLoading = null);
   }
 
-  void cancelDownload() => _cancelDownload = true;
+  Future<void> _loadTranslation(QuranTranslation t, bool download) async {
+    final file = _trFile(t);
+    try {
+      if (file != null && await file.exists()) {
+        final data = await compute(_decodeLists, await file.readAsString());
+        _setTranslation(t, data);
+        return;
+      }
+      final client = _client;
+      if (!download || client == null) {
+        _trState = TranslationState.missing;
+        notifyListeners();
+        return;
+      }
+      _trState = TranslationState.downloading;
+      notifyListeners();
+      final res = await client
+          .get(Uri.parse('$_api/quran/${t.edition}'))
+          .timeout(const Duration(seconds: 60));
+      if (res.statusCode != 200) {
+        throw HttpException('Translation download failed (${res.statusCode})');
+      }
+      final lists = await compute(_extractEdition, res.bodyBytes);
+      if (lists.length != Surah.all.length) {
+        throw const FormatException('Incomplete translation');
+      }
+      if (file != null) {
+        // Write then rename, so a killed app never leaves half a file.
+        await file.parent.create(recursive: true);
+        final tmp = File('${file.path}.tmp');
+        await tmp.writeAsString(jsonEncode(lists), flush: true);
+        await tmp.rename(file.path);
+      }
+      _setTranslation(t, lists);
+    } catch (e) {
+      debugPrint('SLife: translation ${t.edition}: $e');
+      if (_translation == t) {
+        _trState = TranslationState.failed;
+        notifyListeners();
+      }
+    }
+  }
+
+  void _setTranslation(QuranTranslation t, List<List<String>> data) {
+    if (_translation != t) return; // changed meanwhile
+    _tr = data;
+    _trFor = t;
+    _trState = TranslationState.ready;
+    _searchIndex = null;
+    notifyListeners();
+  }
+
+  static List<List<String>> _decodeLists(String raw) => [
+    for (final s in jsonDecode(raw) as List) (s as List).cast<String>(),
+  ];
+
+  static List<List<String>> _extractEdition(Uint8List bytes) {
+    final data = (jsonDecode(utf8.decode(bytes)) as Map)['data'] as Map;
+    return [
+      for (final s in data['surahs'] as List)
+        [
+          for (final a in (s as Map)['ayahs'] as List)
+            (a as Map)['text'] as String,
+        ],
+    ];
+  }
+
+  // -------------------------------------------------------------- search --
+
+  /// Ayahs whose translation or Arabic text contains [query]. Arabic is
+  /// matched without diacritics.
+  Future<List<AyahHit>> search(String query, {int limit = 60}) async {
+    final q = query.trim();
+    if (q.length < 3) return const [];
+    await ensureText();
+    final text = _text!;
+    final arabic = _isArabic(q);
+    List<List<String>>? haystack;
+    if (arabic) {
+      haystack = _searchIndex ??= _db == null
+          ? _normalizeAll(text.surahs)
+          : await compute(_normalizeAll, text.surahs);
+    } else if (hasTranslation) {
+      haystack = _tr;
+    }
+    if (haystack == null) return const [];
+    final needle = arabic ? normalizeArabic(q) : q.toLowerCase();
+    final hits = <AyahHit>[];
+    for (var s = 0; s < haystack.length && hits.length < limit; s++) {
+      final ayahs = haystack[s];
+      for (var a = 0; a < ayahs.length && hits.length < limit; a++) {
+        final h = arabic ? ayahs[a] : ayahs[a].toLowerCase();
+        if (h.contains(needle)) {
+          hits.add(
+            AyahHit(
+              s + 1,
+              a + 1,
+              arabic ? _stripBasmala(s + 1, text.surahs[s][a]) : _tr![s][a],
+            ),
+          );
+        }
+      }
+    }
+    return hits;
+  }
+
+  static bool _isArabic(String s) =>
+      s.runes.any((r) => r >= 0x0600 && r <= 0x06FF);
+
+  static final _marks = RegExp('[ؐ-ًؚ-ٰٟۖ-ۭـ]');
+
+  /// Removes diacritics and unifies letter forms for searching.
+  static String normalizeArabic(String s) => s
+      .replaceAll('﻿', '')
+      .replaceAll(_marks, '')
+      .replaceAll(RegExp('[ٱأإآ]'), 'ا')
+      .replaceAll('ى', 'ي')
+      .replaceAll('ة', 'ه');
+
+  static List<List<String>> _normalizeAll(List<List<String>> surahs) => [
+    for (final s in surahs) [for (final a in s) normalizeArabic(a)],
+  ];
 
   @override
   void dispose() {
     _client?.close();
     super.dispose();
+  }
+}
+
+/// The decoded bundled text.
+class _QuranText {
+  _QuranText(this.surahs, this.juz, this.sajda);
+
+  final List<List<String>> surahs;
+  final List<(int, int)> juz;
+  final Set<(int, int)> sajda;
+
+  static _QuranText parse(String raw) {
+    final m = jsonDecode(raw) as Map;
+    (int, int) pair(Object? x) => ((x as List)[0] as int, x[1] as int);
+    return _QuranText(
+      [for (final s in m['surahs'] as List) (s as List).cast<String>()],
+      [for (final j in m['juz'] as List) pair(j)],
+      {for (final s in m['sajda'] as List) pair(s)},
+    );
   }
 }
