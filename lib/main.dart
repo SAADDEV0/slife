@@ -12,6 +12,7 @@ import 'data/quran_repository.dart';
 import 'data/tasbih_repository.dart';
 import 'services/auth_service.dart';
 import 'services/life_backup.dart';
+import 'services/notification_service.dart';
 import 'services/settings_service.dart';
 import 'services/sync_service.dart';
 
@@ -48,6 +49,17 @@ Future<void> main() async {
     storage: storage,
     life: life,
   );
+  final notifications = NotificationService(
+    settings: settings,
+    planner: planner,
+    journal: journal,
+  );
+  // Before runApp, so a tap that launched the app is known to the home screen.
+  try {
+    await notifications.init();
+  } catch (e) {
+    debugPrint('SLife: notifications unavailable: $e');
+  }
 
   runApp(
     MultiProvider(
@@ -60,6 +72,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: planner),
         ChangeNotifierProvider.value(value: tasbih),
         ChangeNotifierProvider.value(value: quran),
+        Provider.value(value: notifications),
       ],
       child: const SLifeApp(),
     ),

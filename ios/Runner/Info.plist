@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>SLife uses the camera to add photos and videos to your journal.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SLife uses your approximate location once to calculate prayer times for your city.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>SLife uses the microphone to record voice notes and video sound.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

@@ -4,12 +4,13 @@ import '../theme/app_theme.dart';
 import '../utils/dates.dart';
 import '../utils/hijri.dart';
 import '../widgets/common.dart';
+import '../widgets/prayer_card.dart';
 import 'quran_view.dart';
 import 'tasbih_view.dart';
 
 enum _Section { quran, tasbih }
 
-/// Faith: the Quran and the digital tasbih.
+/// Faith: prayer times, the Quran and the digital tasbih.
 class DeenScreen extends StatefulWidget {
   const DeenScreen({super.key});
 
@@ -26,8 +27,12 @@ class _DeenScreenState extends State<DeenScreen> {
       slivers: [
         SliverAppBar.large(expandedHeight: 124, title: const Text('Deen')),
         const SliverPadding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
           sliver: SliverToBoxAdapter(child: _DateHero()),
+        ),
+        const SliverPadding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+          sliver: SliverToBoxAdapter(child: PrayerCard()),
         ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),

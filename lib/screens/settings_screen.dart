@@ -4,13 +4,17 @@ import 'package:provider/provider.dart';
 import '../config.dart';
 import '../data/journal_repository.dart';
 import '../data/media_storage.dart';
+import '../models/planner.dart';
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
+import '../services/prayer_times.dart';
 import '../services/settings_service.dart';
 import '../services/sync_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/dates.dart';
 import '../widgets/common.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/prayer_card.dart';
 import '../widgets/sync_indicator.dart';
 import 'drive_actions.dart';
 
@@ -82,6 +86,9 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               ],
+              const SizedBox(height: 24),
+              const SectionLabel('Reminders'),
+              const _RemindersCard(),
               const SizedBox(height: 24),
               const SectionLabel('Appearance'),
               PillTabs<ThemeMode>(
@@ -384,6 +391,174 @@ class _BackupCard extends StatelessWidget {
             },
             child: const Text('Disconnect'),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RemindersCard extends StatelessWidget {
+  const _RemindersCard();
+
+  static const _leads = [0, 5, 10, 15, 30, 60];
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    final notifications = context.read<NotificationService?>();
+
+    /// Turns a reminder on only once the OS lets us post notifications.
+    Future<void> toggle(bool on, Future<void> Function(bool) set) async {
+      if (!on) return set(false);
+      if (await allowNotifications(context)) await set(true);
+    }
+
+    Future<void> togglePrayers(bool on) async {
+      if (on && !await ensurePrayerLocation(context)) return;
+      if (context.mounted) await toggle(on, settings.setPrayerReminder);
+    }
+
+    final muted = settings.prayerMuted;
+    final prayerNames = [
+      for (final p in Salah.values)
+        if (p.isPrayer && !muted.contains(p.name)) p.label,
+    ];
+
+    Future<void> pickTime(int current, Future<void> Function(int) set) async {
+      final picked = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay(hour: current ~/ 60, minute: current % 60),
+      );
+      if (picked != null) await set(picked.hour * 60 + picked.minute);
+    }
+
+    Future<void> pickLead() async {
+      final lead = await showDialog<int>(
+        context: context,
+        builder: (context) => SimpleDialog(
+          title: const Text('Remind me'),
+          children: [
+            for (final m in _leads)
+              ListTile(
+                title: Text(m == 0 ? 'When it starts' : '$m min before'),
+                trailing: m == settings.blockReminderLead
+                    ? const Icon(Icons.check_rounded)
+                    : null,
+                onTap: () => Navigator.pop(context, m),
+              ),
+          ],
+        ),
+      );
+      if (lead != null) await settings.setBlockReminderLead(lead);
+    }
+
+    Future<void> toggleBlocks(bool on) async {
+      await toggle(on, settings.setBlockReminder);
+      if (!on || !settings.blockReminder || notifications == null) return;
+      if (await notifications.canBeExact() || !context.mounted) return;
+      final ok = await confirmDialog(
+        context,
+        title: 'Remind you on time?',
+        message:
+            'Android needs the "Alarms & reminders" permission so planner '
+            'reminders arrive at the exact minute. Without it they can be a '
+            'few minutes late.',
+        confirm: 'Allow',
+      );
+      if (ok) await notifications.requestExact();
+    }
+
+    String clock(int minutes) => PlanBlock.clock(minutes);
+
+    Widget row({
+      required IconData icon,
+      required String title,
+      required String subtitle,
+      required bool value,
+      required ValueChanged<bool> onChanged,
+      required VoidCallback onEdit,
+    }) {
+      return ListTile(
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        onTap: value ? onEdit : () => onChanged(true),
+        trailing: Switch(value: value, onChanged: onChanged),
+      );
+    }
+
+    return GroupCard(
+      children: [
+        row(
+          icon: Icons.edit_note_rounded,
+          title: 'Write in my journal',
+          subtitle: settings.journalReminder
+              ? 'Every day at ${clock(settings.journalReminderMin)}, '
+                    'unless you already wrote'
+              : 'A gentle nudge in the evening',
+          value: settings.journalReminder,
+          onChanged: (v) => toggle(v, settings.setJournalReminder),
+          onEdit: () => pickTime(
+            settings.journalReminderMin,
+            settings.setJournalReminderMin,
+          ),
+        ),
+        row(
+          icon: Icons.event_available_outlined,
+          title: 'Planner blocks',
+          subtitle: settings.blockReminder
+              ? settings.blockReminderLead == 0
+                    ? 'When each block starts'
+                    : '${settings.blockReminderLead} min before each block'
+              : 'Know when the next block starts',
+          value: settings.blockReminder,
+          onChanged: toggleBlocks,
+          onEdit: pickLead,
+        ),
+        row(
+          icon: Icons.task_alt_rounded,
+          title: 'Tasks due today',
+          subtitle: settings.taskReminder
+              ? 'Every morning at ${clock(settings.taskReminderMin)}'
+              : 'A morning list of what is due',
+          value: settings.taskReminder,
+          onChanged: (v) => toggle(v, settings.setTaskReminder),
+          onEdit: () =>
+              pickTime(settings.taskReminderMin, settings.setTaskReminderMin),
+        ),
+        row(
+          icon: Icons.mosque_outlined,
+          title: 'Prayer times',
+          subtitle: !settings.prayerReminder
+              ? 'At the time of each prayer'
+              : prayerNames.isEmpty
+              ? 'All prayers muted (tap the bells in Deen)'
+              : '${prayerNames.join(', ')} · ${PrayerLocation.label(settings)}',
+          value: settings.prayerReminder,
+          onChanged: togglePrayers,
+          onEdit: () => showPrayerSetup(context),
+        ),
+        row(
+          icon: Icons.wb_sunny_outlined,
+          title: 'Morning adhkar',
+          subtitle: settings.morningAdhkar
+              ? 'Every day at ${clock(settings.morningAdhkarMin)}'
+              : 'Remembrance to start the day',
+          value: settings.morningAdhkar,
+          onChanged: (v) => toggle(v, settings.setMorningAdhkar),
+          onEdit: () =>
+              pickTime(settings.morningAdhkarMin, settings.setMorningAdhkarMin),
+        ),
+        row(
+          icon: Icons.nights_stay_outlined,
+          title: 'Evening adhkar',
+          subtitle: settings.eveningAdhkar
+              ? 'Every day at ${clock(settings.eveningAdhkarMin)}'
+              : 'Remembrance before sunset',
+          value: settings.eveningAdhkar,
+          onChanged: (v) => toggle(v, settings.setEveningAdhkar),
+          onEdit: () =>
+              pickTime(settings.eveningAdhkarMin, settings.setEveningAdhkarMin),
         ),
       ],
     );

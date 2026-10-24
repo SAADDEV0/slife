@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../data/journal_repository.dart';
+import '../services/notification_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/dates.dart';
 import 'album_screen.dart';
@@ -23,6 +26,45 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   bool _fabExtended = true;
+  StreamSubscription<String>? _taps;
+
+  @override
+  void initState() {
+    super.initState();
+    final notifications = context.read<NotificationService?>();
+    _taps = notifications?.taps.listen(_openReminder);
+    final launch = notifications?.takeLaunchPayload();
+    if (launch != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openReminder(launch),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _taps?.cancel();
+    super.dispose();
+  }
+
+  /// Opens what a tapped reminder points to (`journal:<day>`,
+  /// `planner:<day>` or `deen:<day>`).
+  void _openReminder(String payload) {
+    if (!mounted) return;
+    final (kind, day) = switch (payload.split(':')) {
+      [final k, final d] => (k, d),
+      _ => (payload, Dates.todayKey()),
+    };
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    if (kind == 'journal') {
+      _select(0);
+      openDay(context, day);
+    } else if (kind == 'planner') {
+      _select(1);
+    } else if (kind == 'deen') {
+      _select(2);
+    }
+  }
 
   void _select(int index) {
     if (index == _index) return;
